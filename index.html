@@ -1,242 +1,227 @@
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
-<meta charset="utf-8">
-<title>客戶 × 連鎖店 距離分析</title>
+  <meta charset="utf-8" />
+  <title>客戶 × 連鎖店 密度分析</title>
 
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+  />
 
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, "Microsoft JhengHei", sans-serif;
+    }
 
-<style>
-body { margin:0; font-family: Arial, "Microsoft JhengHei", sans-serif; }
-.container { display:grid; grid-template-columns:420px 1fr; height:100vh; }
-.panel { padding:10px; overflow:auto; border-right:1px solid #ccc; }
-#map { height:100%; }
+    h2 {
+      margin: 8px 0;
+    }
 
-textarea, input, button {
-  width:100%; margin-bottom:6px; padding:6px;
-}
+    .container {
+      display: grid;
+      grid-template-columns: 420px 1fr;
+      height: 100vh;
+    }
 
-.ok { color:green; }
-.info { color:#1a73e8; }
-.fail { color:red; }
-.small { font-size:12px; color:#555; }
-hr { margin:10px 0; }
-</style>
+    .panel {
+      padding: 10px;
+      overflow-y: auto;
+      border-right: 1px solid #ccc;
+    }
+
+    textarea, input, button {
+      width: 100%;
+      margin-bottom: 6px;
+      padding: 6px;
+      font-size: 14px;
+    }
+
+    button {
+      cursor: pointer;
+    }
+
+    #map {
+      height: 100%;
+    }
+
+    .ok { color: green; }
+    .fail { color: red; }
+    .small { font-size: 12px; color: #555; }
+    hr { margin: 10px 0; }
+  </style>
 </head>
 
 <body>
 <div class="container">
-<div class="panel">
+  <!-- 左側控制面板 -->
+  <div class="panel">
+    <h2>📍 客戶地址（一行一筆）</h2>
+    <textarea id="customerInput" rows="10"></textarea>
 
-<h2>🗺️ 地圖標示說明</h2>
-<div class="small">
-📍 <b>紅色圖釘</b>：客戶地址<br>
-🔵 <b>藍色圓點</b>：振宇五金門市<br>
-⭕ <b>圓圈</b>：5km / 10km 服務半徑
+    <h2>🏪 連鎖店關鍵字</h2>
+    <input id="keywordInput" placeholder="例如：振宇五金" />
+
+    <button onclick="runAnalysis()">🔍 執行分析</button>
+
+    <hr>
+
+    <h2>🧾 客戶地址 Geocoding</h2>
+    <div id="customerLog"></div>
+
+    <hr>
+
+    <h2>🏪 連鎖店搜尋</h2>
+    <div id="storeLog"></div>
+  </div>
+
+  <!-- 右側地圖 -->
+  <div id="map"></div>
 </div>
 
-<hr>
-
-<h2>📍 客戶地址（一行一筆）</h2>
-<textarea id="customerInput" rows="10"></textarea>
-
-<h2>🏪 連鎖店關鍵字</h2>
-<input id="keywordInput" value="振宇五金">
-
-<button onclick="runAnalysis()">🔍 執行分析</button>
-<button onclick="exportExcel()">📤 匯出 Excel</button>
-
-<hr>
-
-<h2>🧾 客戶地址 Geocoding</h2>
-<div id="customerLog"></div>
-
-<hr>
-
-<h2>📊 分析結果</h2>
-<div id="analysisLog"></div>
-
-<hr>
-
-<h2>🏪 連鎖店搜尋</h2>
-<div id="storeLog"></div>
-
-</div>
-<div id="map"></div>
-</div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
 <script>
-/* ================= 地圖初始化 ================= */
-const map = L.map("map").setView([23.7, 121], 7);
+  /* ========= 地圖初始化 ========= */
+  const map = L.map("map").setView([23.7, 121], 7);
 
-L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-  attribution:"© OpenStreetMap"
-}).addTo(map);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    attribution: "© OpenStreetMap"
+  }).addTo(map);
 
-const customerLayer = L.layerGroup().addTo(map);
-const storeLayer = L.layerGroup().addTo(map);
-const circleLayer = L.layerGroup().addTo(map);
+  const customerLayer = L.layerGroup().addTo(map);
+  const storeLayer = L.layerGroup().addTo(map);
 
-const redIcon = new L.Icon({
-  iconUrl:"https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-red.png",
-  shadowUrl:"https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
-  iconSize:[25,41], iconAnchor:[12,41]
-});
+  /* ========= 工具函式 ========= */
+  function sleep(ms) {
+    return new Promise(r => setTimeout(r, ms));
+  }
 
-let customers = [];
-let stores = [];
-let excelData = [];
-
-/* ================= 工具 ================= */
-const sleep = ms => new Promise(r => setTimeout(r, ms));
-
-function cleanAddress(line){
-  return line.includes("：") ? line.split("：")[1].trim() : line.trim();
-}
-
-function haversine(lat1, lon1, lat2, lon2){
-  const R = 6371;
-  const dLat = (lat2-lat1)*Math.PI/180;
-  const dLon = (lon2-lon1)*Math.PI/180;
-  const a =
-    Math.sin(dLat/2)**2 +
-    Math.cos(lat1*Math.PI/180) *
-    Math.cos(lat2*Math.PI/180) *
-    Math.sin(dLon/2)**2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-}
-
-/* ================= 主流程 ================= */
-async function runAnalysis(){
-  customers=[]; stores=[]; excelData=[];
-  customerLayer.clearLayers();
-  storeLayer.clearLayers();
-  circleLayer.clearLayers();
-  customerLog.innerHTML="";
-  storeLog.innerHTML="";
-  analysisLog.innerHTML="";
-
-  await geocodeCustomers();
-  await searchStores();
-  analyzeDistance();
-}
-
-/* ================= 客戶 Geocoding ================= */
-async function geocodeCustomers(){
-  const lines = customerInput.value.split("\n").filter(l=>l.trim());
-  for(const line of lines){
-    const addr = cleanAddress(line);
-    const q = addr + " 台灣";
-    const url = "https://nominatim.openstreetmap.org/search?" +
-      new URLSearchParams({ q, format:"json", limit:1 });
-
-    const res = await fetch(url,{ headers:{ "Accept-Language":"zh-TW"}});
-    const data = await res.json();
-
-    if(data.length){
-      const lat = +data[0].lat;
-      const lon = +data[0].lon;
-      customers.push({ name:line, lat, lon });
-
-      L.marker([lat,lon],{icon:redIcon})
-        .bindPopup(`<b>客戶</b><br>${line}`)
-        .addTo(customerLayer);
-
-      customerLog.innerHTML +=
-        `<div class="info">ℹ️ ${line}<div class="small">
-        地址重新判斷為 ➜ ${q}</div></div>`;
-    } else {
-      customerLog.innerHTML +=
-        `<div class="fail">❌ ${line}</div>`;
+  function cleanAddress(line) {
+    if (line.includes("：")) {
+      return line.split("：")[1].trim();
     }
-    await sleep(800);
-  }
-}
-
-/* ================= 搜尋振宇五金 ================= */
-async function searchStores(){
-  const keyword = keywordInput.value;
-  const query = `
-[out:json][timeout:25];
-area["name"="臺灣"]["admin_level"="2"]->.a;
-(node["name"~"${keyword}"](area.a);
- way["name"~"${keyword}"](area.a););
-out center;
-`;
-  const res = await fetch("https://overpass-api.de/api/interpreter",
-    {method:"POST", body:query});
-  const data = await res.json();
-
-  if(!data.elements.length){
-    storeLog.innerHTML = `<div class="fail">❌ 無資料</div>`;
-    return;
+    return line.trim();
   }
 
-  data.elements.forEach(el=>{
-    const lat = el.lat || el.center.lat;
-    const lon = el.lon || el.center.lon;
-    const name = el.tags.name;
+  /* ========= 主流程 ========= */
+  async function runAnalysis() {
+    customerLayer.clearLayers();
+    storeLayer.clearLayers();
 
-    stores.push({ name, lat, lon });
+    document.getElementById("customerLog").innerHTML = "";
+    document.getElementById("storeLog").innerHTML = "";
 
-    L.circleMarker([lat,lon],{radius:6})
-      .bindPopup(name)
-      .addTo(storeLayer);
-
-    storeLog.innerHTML += `<div class="ok">✔ ${name}</div>`;
-  });
-}
-
-/* ================= 距離分析 ================= */
-function analyzeDistance(){
-  customers.forEach(c=>{
-    let min = Infinity;
-    let count5=0, count10=0;
-
-    stores.forEach(s=>{
-      const d = haversine(c.lat,c.lon,s.lat,s.lon);
-      if(d < min) min = d;
-      if(d <= 5) count5++;
-      if(d <= 10) count10++;
-    });
-
-    circleLayer.addLayer(
-      L.circle([c.lat,c.lon],{radius:5000, color:"green", fill:false})
-    );
-    circleLayer.addLayer(
-      L.circle([c.lat,c.lon],{radius:10000, color:"orange", fill:false})
-    );
-
-    analysisLog.innerHTML += `
-    <div>
-      <b>${c.name}</b><br>
-      最近門市距離：${min.toFixed(2)} km<br>
-      5km 內：${count5} 家｜10km 內：${count10} 家
-    </div><hr>`;
-
-    excelData.push({
-      客戶:c.name,
-      最近門市距離_km:min.toFixed(2),
-      五公里內門市數:count5,
-      十公里內門市數:count10
-    });
-  });
-}
-
-/* ================= 匯出 Excel ================= */
-function exportExcel(){
-  if(!excelData.length){
-    alert("尚無分析資料");
-    return;
+    await geocodeCustomers();
+    await searchStores();
   }
-  const ws = XLSX.utils.json_to_sheet(excelData);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, "分析結果");
-  XLSX.writeFile(wb, "客戶_振宇五金_距離分析.xlsx");
-}
+
+  /* ========= 客戶地址 Geocoding ========= */
+  async function geocodeCustomers() {
+    const lines = document
+      .getElementById("customerInput")
+      .value
+      .split("\n")
+      .filter(l => l.trim() !== "");
+
+    for (const line of lines) {
+      const addr = cleanAddress(line);
+      const query = addr + " 台灣";
+
+      const url =
+        "https://nominatim.openstreetmap.org/search?" +
+        new URLSearchParams({
+          q: query,
+          format: "json",
+          limit: 1
+        });
+
+      try {
+        const res = await fetch(url, {
+          headers: { "Accept-Language": "zh-TW" }
+        });
+        const data = await res.json();
+
+        if (data.length > 0) {
+          const lat = data[0].lat;
+          const lon = data[0].lon;
+
+          L.marker([lat, lon])
+            .bindPopup(`<b>客戶</b><br>${line}`)
+            .addTo(customerLayer);
+
+          logCustomer(`✔ ${line}<div class="small">➜ ${query}</div>`, true);
+        } else {
+          logCustomer(`✖ ${line}<div class="small">➜ ${query}</div>`, false);
+        }
+      } catch (e) {
+        logCustomer(`✖ ${line}（例外錯誤）`, false);
+      }
+
+      await sleep(900); // 避免被 API 擋
+    }
+  }
+
+  function logCustomer(text, ok) {
+    const div = document.createElement("div");
+    div.className = ok ? "ok" : "fail";
+    div.innerHTML = text;
+    document.getElementById("customerLog").appendChild(div);
+  }
+
+  /* ========= 連鎖店搜尋（Overpass） ========= */
+  async function searchStores() {
+    const keyword = document.getElementById("keywordInput").value.trim();
+    if (!keyword) return;
+
+    const query = `
+      [out:json][timeout:25];
+      area["name"="臺灣"]["admin_level"="2"]->.a;
+      (
+        node["name"~"${keyword}"](area.a);
+        way["name"~"${keyword}"](area.a);
+      );
+      out center;
+    `;
+
+    document.getElementById("storeLog").innerHTML = "🔍 查詢中…";
+
+    try {
+      const res = await fetch(
+        "https://overpass-api.de/api/interpreter",
+        { method: "POST", body: query }
+      );
+
+      const data = await res.json();
+
+      document.getElementById("storeLog").innerHTML = "";
+
+      if (!data.elements || data.elements.length === 0) {
+        document.getElementById("storeLog").innerHTML =
+          `<div class="fail">❌ 無資料</div>`;
+        return;
+      }
+
+      data.elements.forEach(el => {
+        const lat = el.lat || el.center.lat;
+        const lon = el.lon || el.center.lon;
+        const name = el.tags.name;
+
+        L.circleMarker([lat, lon], {
+          radius: 6
+        })
+          .bindPopup(`<b>${name}</b>`)
+          .addTo(storeLayer);
+
+        document.getElementById("storeLog").innerHTML +=
+          `<div class="ok">✔ ${name}</div>`;
+      });
+    } catch (e) {
+      document.getElementById("storeLog").innerHTML =
+        `<div class="fail">❌ 查詢失敗</div>`;
+    }
+  }
 </script>
 </body>
 </html>
