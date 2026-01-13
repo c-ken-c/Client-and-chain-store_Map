@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>台灣地址與連鎖店 GIS 分析系統</title>
+    
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+    
+    <!-- Leaflet Heatmap CSS -->
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f5f5f5;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        .input-section {
+            background: white;
+            padding: 25px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            font-weight: bold;
+            margin-bottom: 8px;
+            color: #555;
+        }
+
+        textarea, input[type="text"] {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+            font-family: inherit;
+        }
+
+        textarea {
+            resize: vertical;
+            min-height: 120px;
+        }
+
+        button {
+            background: #007bff;
+            color: white;
+            padding: 12px 30px;
+            border: none;
+            border-radius: 4px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+
+        button:hover {
+            background: #0056b3;
+        }
+
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        #map {
+            width: 100%;
+            height: 600px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .status {
+            margin-top: 15px;
+            padding: 10px;
+            border-radius: 4px;
+            display: none;
+        }
+
+        .status.info {
+            background: #d1ecf1;
+            color: #0c5460;
+            display: block;
+        }
+
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+            display: block;
+        }
+
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+            display: block;
+        }
+
+        .legend {
+            background: white;
+            padding: 15px;
+            border-radius: 4px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-top: 15px;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .legend-color {
+            width: 20px;
+            height: 20px;
+            margin-right: 10px;
+            border-radius: 50%;
+            border: 2px solid #333;
+        }
+
+        .blue { background: #3388ff; }
+        .red { background: #ff3333; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🗺️ 台灣地址與連鎖店 GIS 分析系統</h1>
+        
+        <div class="input-section">
+            <div class="form-group">
+                <label for="addresses">客戶地址 (一行一個地址):</label>
+                <textarea id="addresses" placeholder="例如:&#10;台北市信義區市府路1號&#10;台中市西屯區台灣大道三段99號&#10;高雄市前鎮區中山二路5號"></textarea>
+            </div>
+
+            <div class="form-group">
+                <label for="keyword">連鎖店關鍵字:</label>
+                <input type="text" id="keyword" placeholder="例如: 7-11, 全家, 星巴克">
+            </div>
+
+            <button id="analyzeBtn">🔍 執行分析</button>
+            
+            <div id="status" class="status"></div>
+        </div>
+
+        <div class="legend">
+            <h3 style="margin-bottom: 10px;">圖例說明</h3>
+            <div class="legend-item">
+                <div class="legend-color blue"></div>
+                <span>客戶地址</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color red"></div>
+                <span>連鎖店位置</span>
+            </div>
+        </div>
+
+        <div id="map"></div>
+    </div>
+
+    <!-- Leaflet JS -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+    
+    <!-- Leaflet Heatmap Plugin -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.heat/0.2.0/leaflet-heat.js"></script>
+
+    <script>
+        // ==================== 全域變數 ====================
+        let map;
+        let customerLayer;
+        let storeLayer;
+        let customerHeatLayer;
+        let storeHeatLayer;
+
+        // ==================== 初始化地圖 ====================
+        function initMap() {
+            // 建立地圖，中心點設在台灣
+            map = L.map('map').setView([23.5, 121], 8);
+
+            // 加入 OpenStreetMap 圖層
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap contributors',
+                maxZoom: 18
+            }).addTo(map);
+
+            // 建立圖層群組
+            customerLayer = L.layerGroup().addTo(map);
+            storeLayer = L.layerGroup().addTo(map);
+        }
+
+        // ==================== 狀態顯示 ====================
+        function showStatus(message, type = 'info') {
+            const statusDiv = document.getElementById('status');
+            statusDiv.textContent = message;
+            statusDiv.className = `status ${type}`;
+        }
+
+        // ==================== 地理編碼 (地址轉經緯度) ====================
+        async function geocodeAddress(address) {
+            try {
+                const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address + ', Taiwan')}&limit=1`;
+                
+                const response = await fetch(url, {
+                    headers: {
+                        'User-Agent': 'GIS-Analysis-App'
+                    }
+                });
+
+                const data = await response.json();
+
+                if (data && data.length > 0) {
+                    return {
+                        lat: parseFloat(data[0].lat),
+                        lon: parseFloat(data[0].lon),
+                        display_name: data[0].display_name
+                    };
+                }
+                return null;
+            } catch (error) {
+                console.error(`地址編碼失敗: ${address}`, error);
+                return null;
+            }
+        }
+
+        // ==================== 搜尋連鎖店 (Overpass API) ====================
+        async function searchStores(keyword) {
+            try {
+                // Overpass API 查詢語法
+                const query = `
+                    [out:json][timeout:25];
+                    area["ISO3166-1"="TW"]->.taiwan;
+                    (
+                        node["name"~"${keyword}",i](area.taiwan);
+                        way["name"~"${keyword}",i](area.taiwan);
+                    );
+                    out center;
+                `;
+
+                const url = 'https://overpass-api.de/api/interpreter';
+                
+                const response = await fetch(url, {
+                    method: 'POST',
+                    body: query
+                });
+
+                const data = await response.json();
+
+                const stores = [];
+                
+                if (data.elements) {
+                    for (const element of data.elements) {
+                        let lat, lon;
+                        
+                        if (element.type === 'node') {
+                            lat = element.lat;
+                            lon = element.lon;
+                        } else if (element.center) {
+                            lat = element.center.lat;
+                            lon = element.center.lon;
+                        }
+
+                        if (lat && lon) {
+                            stores.push({
+                                name: element.tags.name || keyword,
+                                lat: lat,
+                                lon: lon
+                            });
+                        }
+                    }
+                }
+
+                return stores;
+            } catch (error) {
+                console.error('店家搜尋失敗:', error);
+                return [];
+            }
+        }
+
+        // ==================== 在地圖上顯示客戶地址 ====================
+        function displayCustomers(customers) {
+            customerLayer.clearLayers();
+
+            const heatPoints = [];
+
+            customers.forEach(customer => {
+                if (customer.lat && customer.lon) {
+                    // 建立藍色 Marker
+                    const marker = L.circleMarker([customer.lat, customer.lon], {
+                        color: '#3388ff',
+                        fillColor: '#3388ff',
+                        fillOpacity: 0.7,
+                        radius: 8
+                    });
+
+                    marker.bindPopup(`<b>客戶地址</b><br>${customer.display_name || '地址'}`);
+                    marker.addTo(customerLayer);
+
+                    // 加入熱力圖資料
+                    heatPoints.push([customer.lat, customer.lon, 1]);
+                }
+            });
+
+            // 移除舊的熱力圖
+            if (customerHeatLayer) {
+                map.removeLayer(customerHeatLayer);
+            }
+
+            // 建立客戶熱力圖
+            if (heatPoints.length > 0) {
+                customerHeatLayer = L.heatLayer(heatPoints, {
+                    radius: 25,
+                    blur: 35,
+                    maxZoom: 17,
+                    max: 1.0,
+                    gradient: {
+                        0.0: 'blue',
+                        0.5: 'cyan',
+                        1.0: 'lime'
+                    }
+                }).addTo(map);
+            }
+        }
+
+        // ==================== 在地圖上顯示連鎖店 ====================
+        function displayStores(stores) {
+            storeLayer.clearLayers();
+
+            const heatPoints = [];
+
+            stores.forEach(store => {
+                if (store.lat && store.lon) {
+                    // 建立紅色 Marker
+                    const marker = L.circleMarker([store.lat, store.lon], {
+                        color: '#ff3333',
+                        fillColor: '#ff3333',
+                        fillOpacity: 0.7,
+                        radius: 6
+                    });
+
+                    marker.bindPopup(`<b>${store.name}</b>`);
+                    marker.addTo(storeLayer);
+
+                    // 加入熱力圖資料
+                    heatPoints.push([store.lat, store.lon, 1]);
+                }
+            });
+
+            // 移除舊的熱力圖
+            if (storeHeatLayer) {
+                map.removeLayer(storeHeatLayer);
+            }
+
+            // 建立店家熱力圖
+            if (heatPoints.length > 0) {
+                storeHeatLayer = L.heatLayer(heatPoints, {
+                    radius: 20,
+                    blur: 30,
+                    maxZoom: 17,
+                    max: 1.0,
+                    gradient: {
+                        0.0: 'yellow',
+                        0.5: 'orange',
+                        1.0: 'red'
+                    }
+                }).addTo(map);
+            }
+        }
+
+        // ==================== 自動縮放地圖至所有標記 ====================
+        function fitMapToMarkers(customers, stores) {
+            const bounds = [];
+
+            customers.forEach(c => {
+                if (c.lat && c.lon) {
+                    bounds.push([c.lat, c.lon]);
+                }
+            });
+
+            stores.forEach(s => {
+                if (s.lat && s.lon) {
+                    bounds.push([s.lat, s.lon]);
+                }
+            });
+
+            if (bounds.length > 0) {
+                map.fitBounds(bounds, { padding: [50, 50] });
+            }
+        }
+
+        // ==================== 主要分析流程 ====================
+        async function performAnalysis() {
+            const addressesText = document.getElementById('addresses').value.trim();
+            const keyword = document.getElementById('keyword').value.trim();
+            const analyzeBtn = document.getElementById('analyzeBtn');
+
+            // 驗證輸入
+            if (!addressesText) {
+                showStatus('請輸入至少一個客戶地址', 'error');
+                return;
+            }
+
+            if (!keyword) {
+                showStatus('請輸入連鎖店關鍵字', 'error');
+                return;
+            }
+
+            // 停用按鈕
+            analyzeBtn.disabled = true;
+            showStatus('正在處理中，請稍候...', 'info');
+
+            try {
+                // 步驟 1: 處理客戶地址
+                const addresses = addressesText.split('\n').filter(addr => addr.trim());
+                showStatus(`正在地理編碼 ${addresses.length} 個地址...`, 'info');
+
+                const customers = [];
+                for (let i = 0; i < addresses.length; i++) {
+                    const address = addresses[i].trim();
+                    showStatus(`地理編碼中 (${i + 1}/${addresses.length}): ${address}`, 'info');
+                    
+                    const result = await geocodeAddress(address);
+                    
+                    if (result) {
+                        customers.push(result);
+                    } else {
+                        console.warn(`無法編碼地址: ${address}`);
+                    }
+
+                    // 避免請求過快 (Nominatim 有速率限制)
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                }
+
+                showStatus(`成功編碼 ${customers.length}/${addresses.length} 個地址`, 'info');
+
+                // 步驟 2: 搜尋連鎖店
+                showStatus(`正在搜尋關鍵字: ${keyword}...`, 'info');
+                const stores = await searchStores(keyword);
+                showStatus(`找到 ${stores.length} 個店家`, 'info');
+
+                // 步驟 3: 顯示在地圖上
+                if (customers.length > 0) {
+                    displayCustomers(customers);
+                }
+
+                if (stores.length > 0) {
+                    displayStores(stores);
+                }
+
+                // 步驟 4: 自動縮放
+                fitMapToMarkers(customers, stores);
+
+                showStatus(`✅ 分析完成! 客戶: ${customers.length} 個 | 店家: ${stores.length} 個`, 'success');
+
+            } catch (error) {
+                console.error('分析過程發生錯誤:', error);
+                showStatus('分析失敗，請查看 console 取得更多資訊', 'error');
+            } finally {
+                analyzeBtn.disabled = false;
+            }
+        }
+
+        // ==================== 事件監聽 ====================
+        document.addEventListener('DOMContentLoaded', () => {
+            initMap();
+
+            document.getElementById('analyzeBtn').addEventListener('click', performAnalysis);
+        });
+    </script>
+</body>
+</html>
