@@ -260,12 +260,15 @@
     const keyword = document.getElementById("keywordInput").value.trim();
     if (!keyword) return;
 
+    // 使用台灣的 bounding box (西, 南, 東, 北)
+    const taiwanBBox = '120.0,21.8,122.1,25.4';
+
     const query = `
-      [out:json][timeout:25];
-      area["name"="臺灣"]["admin_level"="2"]->.a;
+      [out:json][timeout:30];
       (
-        node["name"~"${keyword}"](area.a);
-        way["name"~"${keyword}"](area.a);
+        node["name"~"${keyword}",i](${taiwanBBox});
+        way["name"~"${keyword}",i](${taiwanBBox});
+        relation["name"~"${keyword}",i](${taiwanBBox});
       );
       out center;
     `;
@@ -278,19 +281,37 @@
         { method: "POST", body: query }
       );
 
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+      }
+
       const data = await res.json();
 
       document.getElementById("storeLog").innerHTML = "";
 
       if (!data.elements || data.elements.length === 0) {
         document.getElementById("storeLog").innerHTML =
-          `<div class="fail">❌ 無資料</div>`;
+          `<div class="fail">❌ 查無「${keyword}」相關店家</div>`;
         return;
       }
 
+      let count = 0;
       data.elements.forEach(el => {
-        const lat = el.lat || el.center.lat;
-        const lon = el.lon || el.center.lon;
+        let lat, lon;
+
+        // 處理不同類型的元素
+        if (el.type === 'node') {
+          lat = el.lat;
+          lon = el.lon;
+        } else if (el.center) {
+          lat = el.center.lat;
+          lon = el.center.lon;
+        }
+
+        if (!lat || !lon || !el.tags || !el.tags.name) {
+          return; // 跳過無效資料
+        }
+
         const name = el.tags.name;
 
         // 紅色圓圈標記連鎖店
@@ -305,12 +326,20 @@
           .bindPopup(`<b>連鎖店</b><br>${name}`)
           .addTo(storeLayer);
 
+        count++;
         document.getElementById("storeLog").innerHTML +=
           `<div class="ok">✔ ${name}</div>`;
       });
+
+      if (count === 0) {
+        document.getElementById("storeLog").innerHTML =
+          `<div class="fail">❌ 查無「${keyword}」相關店家</div>`;
+      }
+
     } catch (e) {
+      console.error('Overpass API 錯誤:', e);
       document.getElementById("storeLog").innerHTML =
-        `<div class="fail">❌ 查詢失敗</div>`;
+        `<div class="fail">❌ 查詢失敗：${e.message}</div>`;
     }
   }
 </script>
