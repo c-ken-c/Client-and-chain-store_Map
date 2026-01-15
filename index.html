@@ -274,6 +274,7 @@
       if (layer.getLatLng) {
         const latLng = layer.getLatLng();
         allMarkers.push([latLng.lat, latLng.lng]);
+        addDebug(`客戶標記: [${latLng.lat}, ${latLng.lng}]`);
       }
     });
     
@@ -282,6 +283,7 @@
       if (layer.getLatLng) {
         const latLng = layer.getLatLng();
         allMarkers.push([latLng.lat, latLng.lng]);
+        addDebug(`店家標記: [${latLng.lat}, ${latLng.lng}]`);
       }
     });
     
@@ -289,8 +291,17 @@
     
     if (allMarkers.length > 0) {
       const bounds = L.latLngBounds(allMarkers);
-      map.fitBounds(bounds, { padding: [50, 50] });
+      map.fitBounds(bounds, { 
+        padding: [50, 50],
+        maxZoom: 12  // 限制最大縮放層級，避免太近
+      });
       addDebug(`地圖已縮放至範圍: ${JSON.stringify(bounds)}`);
+      
+      // 強制重繪
+      setTimeout(() => {
+        map.invalidateSize();
+        addDebug(`地圖已重繪`);
+      }, 100);
     } else {
       addDebug(`沒有標記可縮放`);
     }
@@ -376,7 +387,7 @@
 
         addDebug(`✓ ${originalLine} => (${lat}, ${lon})`);
 
-        // 藍色圓圈標記客戶
+        // 藍色圓圈標記客戶 - 確保參數正確
         const marker = L.circleMarker([lat, lon], {
           radius: 8,
           fillColor: "#3388ff",
@@ -384,11 +395,15 @@
           weight: 2,
           opacity: 1,
           fillOpacity: 0.7
-        })
-          .bindPopup(`<b>客戶地址</b><br>${originalLine}<br><small>定位: ${query}</small>`)
-          .addTo(customerLayer);
+        });
+        
+        marker.bindPopup(`<b>客戶地址</b><br>${originalLine}<br><small>定位: ${query}</small>`);
+        marker.addTo(customerLayer);
 
-        addDebug(`Marker 已加入圖層，座標: [${lat}, ${lon}]`);
+        addDebug(`Marker 已加入圖層，座標: [${lat}, ${lon}], 類型: ${marker instanceof L.CircleMarker}`);
+
+        // 強制重繪圖層
+        map.invalidateSize();
 
         return { lat, lon, query };
       }
@@ -421,16 +436,22 @@
     // 嘗試多種搜尋策略
     let stores = [];
     
-    // 策略 1: 精確搜尋店名
-    stores = await searchOverpass(keyword, 'name');
+    // 策略 1: 使用 area 方式（您原本的版本，對某些資料較有效）
+    stores = await searchOverpass(keyword, 'area');
     
-    // 策略 2: 如果沒結果，搜尋 shop 標籤（五金行）
+    // 策略 2: 如果沒結果，用 bounding box 精確搜尋
+    if (stores.length === 0) {
+      addDebug(`area 查詢無結果，嘗試 bbox 方式`);
+      stores = await searchOverpass(keyword, 'bbox');
+    }
+    
+    // 策略 3: 如果是五金相關，搜尋 shop 標籤
     if (stores.length === 0 && keyword.includes('五金')) {
       addDebug(`嘗試搜尋 shop=hardware`);
       stores = await searchOverpass(keyword, 'shop');
     }
     
-    // 策略 3: 如果還是沒結果，搜尋 amenity 標籤
+    // 策略 4: 搜尋 amenity 標籤
     if (stores.length === 0) {
       addDebug(`嘗試搜尋 amenity`);
       stores = await searchOverpass(keyword, 'amenity');
@@ -454,9 +475,10 @@
         weight: 2,
         opacity: 1,
         fillOpacity: 0.7
-      })
-        .bindPopup(`<b>連鎖店</b><br>${store.name}`)
-        .addTo(storeLayer);
+      });
+      
+      marker.bindPopup(`<b>連鎖店</b><br>${store.name}`);
+      marker.addTo(storeLayer);
 
       document.getElementById("storeLog").innerHTML +=
         `<div class="ok">✔ ${store.name}</div>`;
@@ -469,8 +491,18 @@
   async function searchOverpass(keyword, searchType) {
     let query;
     
-    if (searchType === 'shop') {
-      // 搜尋五金行
+    // 策略選擇：先用 area 查詢（您之前的版本），失敗再用 bbox
+    if (searchType === 'area') {
+      // 使用 area 方式（您原本的版本）
+      query = `[out:json][timeout:30];
+area["name"="臺灣"]["admin_level"="2"]->.a;
+(
+  node["name"~"${keyword}",i](area.a);
+  way["name"~"${keyword}",i](area.a);
+);
+out center;`;
+    } else if (searchType === 'shop') {
+      // 搜尋五金行（使用 bbox）
       query = `[out:json][timeout:30];
 (
   node["shop"="hardware"]["name"~"${keyword}",i](21.8,120.0,25.4,122.1);
@@ -480,7 +512,7 @@
 );
 out center;`;
     } else if (searchType === 'amenity') {
-      // 搜尋設施
+      // 搜尋設施（使用 bbox）
       query = `[out:json][timeout:30];
 (
   node["amenity"]["name"~"${keyword}",i](21.8,120.0,25.4,122.1);
@@ -488,7 +520,7 @@ out center;`;
 );
 out center;`;
     } else {
-      // 預設：只搜尋名稱
+      // bbox 方式
       query = `[out:json][timeout:30];
 (
   node["name"~"${keyword}",i](21.8,120.0,25.4,122.1);
