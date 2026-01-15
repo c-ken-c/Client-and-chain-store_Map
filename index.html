@@ -269,62 +269,96 @@
 
     for (const line of lines) {
       const addr = cleanAddress(line);
-      const query = addr + " 台灣";
-
-      const url =
-        "https://nominatim.openstreetmap.org/search?" +
-        new URLSearchParams({
-          q: query,
-          format: "json",
-          limit: 1
-        });
-
-      addDebug(`查詢: ${url}`);
-
-      try {
-        const res = await fetch(url, {
-          headers: { "Accept-Language": "zh-TW" }
-        });
-        const data = await res.json();
-
-        addDebug(`回應資料長度: ${data.length}`);
-
-        if (data.length > 0) {
-          const lat = parseFloat(data[0].lat);
-          const lon = parseFloat(data[0].lon);
-
-          addDebug(`✓ ${line} => (${lat}, ${lon})`);
-
-          // 藍色圓圈標記客戶
-          const marker = L.circleMarker([lat, lon], {
-            radius: 8,
-            fillColor: "#3388ff",
-            color: "#2277ee",
-            weight: 2,
-            opacity: 1,
-            fillOpacity: 0.7
-          })
-            .bindPopup(`<b>客戶地址</b><br>${line}`)
-            .addTo(customerLayer);
-
-          addDebug(`Marker 已加入圖層，座標: [${lat}, ${lon}]`);
-          successCount++;
-
-          logCustomer(`✔ ${line} <span class="small">➜ ${query}</span>`, true);
-        } else {
-          addDebug(`✗ ${line} => 查無結果`);
-          logCustomer(`✖ ${line} <span class="small">➜ ${query}</span>`, false);
+      
+      // 嘗試多種查詢策略
+      let result = null;
+      
+      // 策略 1: 完整地址
+      result = await tryGeocode(addr + " 台灣", line);
+      
+      // 策略 2: 如果失敗，移除門牌號碼再試一次（只保留路名）
+      if (!result) {
+        const addrWithoutNumber = addr.replace(/\d+號?$/, '').trim();
+        if (addrWithoutNumber !== addr) {
+          addDebug(`嘗試移除門牌號碼: ${addrWithoutNumber}`);
+          result = await tryGeocode(addrWithoutNumber + " 台灣", line);
         }
-      } catch (e) {
-        addDebug(`✗ ${line} => 例外: ${e.message}`);
-        logCustomer(`✖ ${line} <span class="small">（例外錯誤）</span>`, false);
+      }
+      
+      // 策略 3: 如果還是失敗，只保留到區
+      if (!result) {
+        const match = addr.match(/(.*?[市縣].*?[區鄉鎮市])/);
+        if (match) {
+          const districtOnly = match[1];
+          addDebug(`嘗試只用區域: ${districtOnly}`);
+          result = await tryGeocode(districtOnly + " 台灣", line);
+        }
       }
 
-      await sleep(900); // 避免被 API 擋
+      if (result) {
+        successCount++;
+        logCustomer(`✔ ${line} <span class="small">➜ ${result.query}</span>`, true);
+      } else {
+        logCustomer(`✖ ${line} <span class="small">➜ 無法定位</span>`, false);
+      }
+
+      await sleep(1000); // 避免被 API 擋
     }
 
     addDebug(`客戶地址成功定位: ${successCount}/${lines.length}`);
     addDebug(`customerLayer 內的 Marker 數量: ${Object.keys(customerLayer._layers).length}`);
+  }
+
+  async function tryGeocode(query, originalLine) {
+    const url =
+      "https://nominatim.openstreetmap.org/search?" +
+      new URLSearchParams({
+        q: query,
+        format: "json",
+        limit: 1,
+        countrycodes: "tw"
+      });
+
+    addDebug(`查詢: ${query}`);
+
+    try {
+      const res = await fetch(url, {
+        headers: { "Accept-Language": "zh-TW" }
+      });
+      const data = await res.json();
+
+      addDebug(`回應資料長度: ${data.length}`);
+
+      if (data.length > 0) {
+        const lat = parseFloat(data[0].lat);
+        const lon = parseFloat(data[0].lon);
+
+        addDebug(`✓ ${originalLine} => (${lat}, ${lon})`);
+
+        // 藍色圓圈標記客戶
+        const marker = L.circleMarker([lat, lon], {
+          radius: 8,
+          fillColor: "#3388ff",
+          color: "#2277ee",
+          weight: 2,
+          opacity: 1,
+          fillOpacity: 0.7
+        })
+          .bindPopup(`<b>客戶地址</b><br>${originalLine}<br><small>定位: ${query}</small>`)
+          .addTo(customerLayer);
+
+        addDebug(`Marker 已加入圖層，座標: [${lat}, ${lon}]`);
+
+        return { lat, lon, query };
+      }
+      
+      addDebug(`✗ 查無結果`);
+      return null;
+      
+    } catch (e) {
+      addDebug(`✗ 例外: ${e.message}`);
+      return null;
+    }
   }
 
   function logCustomer(text, ok) {
@@ -339,19 +373,90 @@
     const keyword = document.getElementById("keywordInput").value.trim();
     if (!keyword) return;
 
-    // 使用台灣的 bounding box (南, 西, 北, 東)
-    const query = `[out:json][timeout:30];
+    addDebug(`Overpass 查詢: ${keyword}`);
+
+    document.getElementById("storeLog").innerHTML = "🔍 查詢中…";
+
+    // 嘗試多種搜尋策略
+    let stores = [];
+    
+    // 策略 1: 精確搜尋店名
+    stores = await searchOverpass(keyword, 'name');
+    
+    // 策略 2: 如果沒結果，搜尋 shop 標籤（五金行）
+    if (stores.length === 0 && keyword.includes('五金')) {
+      addDebug(`嘗試搜尋 shop=hardware`);
+      stores = await searchOverpass(keyword, 'shop');
+    }
+    
+    // 策略 3: 如果還是沒結果，搜尋 amenity 標籤
+    if (stores.length === 0) {
+      addDebug(`嘗試搜尋 amenity`);
+      stores = await searchOverpass(keyword, 'amenity');
+    }
+
+    document.getElementById("storeLog").innerHTML = "";
+
+    if (stores.length === 0) {
+      document.getElementById("storeLog").innerHTML =
+        `<div class="fail">❌ 查無「${keyword}」相關店家<br><small>建議: 1) 換個關鍵字試試 2) OSM 可能無此資料</small></div>`;
+      addDebug(`所有策略都查無結果`);
+      return;
+    }
+
+    // 顯示找到的店家
+    stores.forEach(store => {
+      const marker = L.circleMarker([store.lat, store.lon], {
+        radius: 6,
+        fillColor: "#ff3333",
+        color: "#cc0000",
+        weight: 2,
+        opacity: 1,
+        fillOpacity: 0.7
+      })
+        .bindPopup(`<b>連鎖店</b><br>${store.name}`)
+        .addTo(storeLayer);
+
+      document.getElementById("storeLog").innerHTML +=
+        `<div class="ok">✔ ${store.name}</div>`;
+    });
+
+    addDebug(`成功標記 ${stores.length} 個店家`);
+    addDebug(`storeLayer 內的 Marker 數量: ${Object.keys(storeLayer._layers).length}`);
+  }
+
+  async function searchOverpass(keyword, searchType) {
+    let query;
+    
+    if (searchType === 'shop') {
+      // 搜尋五金行
+      query = `[out:json][timeout:30];
+(
+  node["shop"="hardware"]["name"~"${keyword}",i](21.8,120.0,25.4,122.1);
+  way["shop"="hardware"]["name"~"${keyword}",i](21.8,120.0,25.4,122.1);
+  node["shop"="doityourself"]["name"~"${keyword}",i](21.8,120.0,25.4,122.1);
+  way["shop"="doityourself"]["name"~"${keyword}",i](21.8,120.0,25.4,122.1);
+);
+out center;`;
+    } else if (searchType === 'amenity') {
+      // 搜尋設施
+      query = `[out:json][timeout:30];
+(
+  node["amenity"]["name"~"${keyword}",i](21.8,120.0,25.4,122.1);
+  way["amenity"]["name"~"${keyword}",i](21.8,120.0,25.4,122.1);
+);
+out center;`;
+    } else {
+      // 預設：只搜尋名稱
+      query = `[out:json][timeout:30];
 (
   node["name"~"${keyword}",i](21.8,120.0,25.4,122.1);
   way["name"~"${keyword}",i](21.8,120.0,25.4,122.1);
-  relation["name"~"${keyword}",i](21.8,120.0,25.4,122.1);
 );
 out center;`;
+    }
 
-    addDebug(`Overpass 查詢: ${keyword}`);
-    addDebug(`查詢語法長度: ${query.length} 字元`);
-
-    document.getElementById("storeLog").innerHTML = "🔍 查詢中…";
+    addDebug(`查詢類型: ${searchType}, 語法長度: ${query.length} 字元`);
 
     try {
       const res = await fetch(
@@ -370,82 +475,43 @@ out center;`;
       if (!res.ok) {
         const errorText = await res.text();
         addDebug(`錯誤回應: ${errorText.substring(0, 200)}`);
-        throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+        return [];
       }
 
       const data = await res.json();
+      addDebug(`回應元素數量 (${searchType}): ${data.elements ? data.elements.length : 0}`);
 
-      addDebug(`回應元素數量: ${data.elements ? data.elements.length : 0}`);
+      const stores = [];
 
       if (data.elements && data.elements.length > 0) {
-        addDebug(`前3筆資料: ${JSON.stringify(data.elements.slice(0, 3), null, 2)}`);
+        data.elements.forEach((el, index) => {
+          let lat, lon;
+
+          if (el.type === 'node') {
+            lat = el.lat;
+            lon = el.lon;
+          } else if (el.center) {
+            lat = el.center.lat;
+            lon = el.center.lon;
+          }
+
+          if (lat && lon && el.tags && el.tags.name) {
+            stores.push({
+              name: el.tags.name,
+              lat: parseFloat(lat),
+              lon: parseFloat(lon)
+            });
+            addDebug(`找到: ${el.tags.name} at [${lat}, ${lon}]`);
+          }
+        });
       }
 
-      document.getElementById("storeLog").innerHTML = "";
-
-      if (!data.elements || data.elements.length === 0) {
-        document.getElementById("storeLog").innerHTML =
-          `<div class="fail">❌ 查無「${keyword}」相關店家</div>`;
-        addDebug(`查無結果 - 可能原因: 1) 關鍵字不符 2) OSM 無此資料`);
-        return;
-      }
-
-      let count = 0;
-      data.elements.forEach((el, index) => {
-        let lat, lon;
-
-        // 處理不同類型的元素
-        if (el.type === 'node') {
-          lat = el.lat;
-          lon = el.lon;
-        } else if (el.center) {
-          lat = el.center.lat;
-          lon = el.center.lon;
-        }
-
-        addDebug(`元素 ${index}: type=${el.type}, lat=${lat}, lon=${lon}, name=${el.tags?.name}`);
-
-        if (!lat || !lon || !el.tags || !el.tags.name) {
-          addDebug(`元素 ${index} 跳過: 缺少必要資料`);
-          return; // 跳過無效資料
-        }
-
-        const name = el.tags.name;
-
-        // 紅色圓圈標記連鎖店
-        const marker = L.circleMarker([lat, lon], {
-          radius: 6,
-          fillColor: "#ff3333",
-          color: "#cc0000",
-          weight: 2,
-          opacity: 1,
-          fillOpacity: 0.7
-        })
-          .bindPopup(`<b>連鎖店</b><br>${name}`)
-          .addTo(storeLayer);
-
-        addDebug(`Marker 已加入: ${name} at [${lat}, ${lon}]`);
-
-        count++;
-        document.getElementById("storeLog").innerHTML +=
-          `<div class="ok">✔ ${name}</div>`;
-      });
-
-      addDebug(`storeLayer 內的 Marker 數量: ${Object.keys(storeLayer._layers).length}`);
-
-      if (count === 0) {
-        document.getElementById("storeLog").innerHTML =
-          `<div class="fail">❌ 查無「${keyword}」相關店家</div>`;
-        addDebug(`雖有回應但無有效資料`);
-      } else {
-        addDebug(`成功標記 ${count} 個店家`);
-      }
+      return stores;
 
     } catch (e) {
       console.error('Overpass API 錯誤:', e);
-      addDebug(`例外錯誤: ${e.message}`);
-      document.getElementById("storeLog").innerHTML =
-        `<div class="fail">❌ 查詢失敗：${e.message}</div>`;
+      addDebug(`例外錯誤 (${searchType}): ${e.message}`);
+      return [];
     }
   }
 </script>
