@@ -107,6 +107,29 @@
     .legend-text {
       font-size: 13px;
     }
+
+    /* 除錯面板 */
+    .debug-section {
+      background: #f8f9fa;
+      padding: 10px;
+      border-radius: 4px;
+      margin-top: 10px;
+      font-size: 12px;
+      font-family: monospace;
+      max-height: 200px;
+      overflow-y: auto;
+    }
+
+    .debug-title {
+      font-weight: bold;
+      color: #666;
+      margin-bottom: 5px;
+    }
+
+    .debug-item {
+      padding: 3px 0;
+      border-bottom: 1px solid #ddd;
+    }
   </style>
 </head>
 
@@ -144,6 +167,12 @@
 
     <h2>🏪 連鎖店搜尋</h2>
     <div id="storeLog"></div>
+
+    <!-- 除錯資訊 -->
+    <div class="debug-section" id="debugSection" style="display:none;">
+      <div class="debug-title">🐛 除錯資訊</div>
+      <div id="debugLog"></div>
+    </div>
   </div>
 
   <!-- 右側地圖 -->
@@ -163,6 +192,32 @@
   const customerLayer = L.layerGroup().addTo(map);
   const storeLayer = L.layerGroup().addTo(map);
 
+  // 除錯用的全域陣列
+  let debugInfo = [];
+
+  function addDebug(msg) {
+    debugInfo.push(msg);
+    console.log('[DEBUG]', msg);
+  }
+
+  function showDebug() {
+    const debugSection = document.getElementById('debugSection');
+    const debugLog = document.getElementById('debugLog');
+    
+    if (debugInfo.length > 0) {
+      debugSection.style.display = 'block';
+      debugLog.innerHTML = debugInfo.map(msg => 
+        `<div class="debug-item">${msg}</div>`
+      ).join('');
+    }
+  }
+
+  function clearDebug() {
+    debugInfo = [];
+    document.getElementById('debugSection').style.display = 'none';
+    document.getElementById('debugLog').innerHTML = '';
+  }
+
   /* ========= 工具函式 ========= */
   function sleep(ms) {
     return new Promise(r => setTimeout(r, ms));
@@ -177,12 +232,16 @@
 
   /* ========= 主流程 ========= */
   async function runAnalysis() {
+    clearDebug();
+    
     // 驗證關鍵字不可為空
     const keyword = document.getElementById("keywordInput").value.trim();
     if (!keyword) {
       alert("請輸入連鎖店關鍵字！");
       return;
     }
+
+    addDebug(`開始分析 - 關鍵字: ${keyword}`);
 
     customerLayer.clearLayers();
     storeLayer.clearLayers();
@@ -192,6 +251,8 @@
 
     await geocodeCustomers();
     await searchStores();
+    
+    showDebug();
   }
 
   /* ========= 客戶地址 Geocoding ========= */
@@ -201,6 +262,10 @@
       .value
       .split("\n")
       .filter(l => l.trim() !== "");
+
+    addDebug(`客戶地址總數: ${lines.length}`);
+
+    let successCount = 0;
 
     for (const line of lines) {
       const addr = cleanAddress(line);
@@ -214,18 +279,24 @@
           limit: 1
         });
 
+      addDebug(`查詢: ${url}`);
+
       try {
         const res = await fetch(url, {
           headers: { "Accept-Language": "zh-TW" }
         });
         const data = await res.json();
 
+        addDebug(`回應資料長度: ${data.length}`);
+
         if (data.length > 0) {
-          const lat = data[0].lat;
-          const lon = data[0].lon;
+          const lat = parseFloat(data[0].lat);
+          const lon = parseFloat(data[0].lon);
+
+          addDebug(`✓ ${line} => (${lat}, ${lon})`);
 
           // 藍色圓圈標記客戶
-          L.circleMarker([lat, lon], {
+          const marker = L.circleMarker([lat, lon], {
             radius: 8,
             fillColor: "#3388ff",
             color: "#2277ee",
@@ -236,16 +307,24 @@
             .bindPopup(`<b>客戶地址</b><br>${line}`)
             .addTo(customerLayer);
 
+          addDebug(`Marker 已加入圖層，座標: [${lat}, ${lon}]`);
+          successCount++;
+
           logCustomer(`✔ ${line} <span class="small">➜ ${query}</span>`, true);
         } else {
+          addDebug(`✗ ${line} => 查無結果`);
           logCustomer(`✖ ${line} <span class="small">➜ ${query}</span>`, false);
         }
       } catch (e) {
+        addDebug(`✗ ${line} => 例外: ${e.message}`);
         logCustomer(`✖ ${line} <span class="small">（例外錯誤）</span>`, false);
       }
 
       await sleep(900); // 避免被 API 擋
     }
+
+    addDebug(`客戶地址成功定位: ${successCount}/${lines.length}`);
+    addDebug(`customerLayer 內的 Marker 數量: ${Object.keys(customerLayer._layers).length}`);
   }
 
   function logCustomer(text, ok) {
@@ -269,6 +348,9 @@
 );
 out center;`;
 
+    addDebug(`Overpass 查詢: ${keyword}`);
+    addDebug(`查詢語法長度: ${query.length} 字元`);
+
     document.getElementById("storeLog").innerHTML = "🔍 查詢中…";
 
     try {
@@ -283,22 +365,33 @@ out center;`;
         }
       );
 
+      addDebug(`HTTP 狀態: ${res.status} ${res.statusText}`);
+
       if (!res.ok) {
+        const errorText = await res.text();
+        addDebug(`錯誤回應: ${errorText.substring(0, 200)}`);
         throw new Error(`HTTP ${res.status}: ${res.statusText}`);
       }
 
       const data = await res.json();
+
+      addDebug(`回應元素數量: ${data.elements ? data.elements.length : 0}`);
+
+      if (data.elements && data.elements.length > 0) {
+        addDebug(`前3筆資料: ${JSON.stringify(data.elements.slice(0, 3), null, 2)}`);
+      }
 
       document.getElementById("storeLog").innerHTML = "";
 
       if (!data.elements || data.elements.length === 0) {
         document.getElementById("storeLog").innerHTML =
           `<div class="fail">❌ 查無「${keyword}」相關店家</div>`;
+        addDebug(`查無結果 - 可能原因: 1) 關鍵字不符 2) OSM 無此資料`);
         return;
       }
 
       let count = 0;
-      data.elements.forEach(el => {
+      data.elements.forEach((el, index) => {
         let lat, lon;
 
         // 處理不同類型的元素
@@ -310,14 +403,17 @@ out center;`;
           lon = el.center.lon;
         }
 
+        addDebug(`元素 ${index}: type=${el.type}, lat=${lat}, lon=${lon}, name=${el.tags?.name}`);
+
         if (!lat || !lon || !el.tags || !el.tags.name) {
+          addDebug(`元素 ${index} 跳過: 缺少必要資料`);
           return; // 跳過無效資料
         }
 
         const name = el.tags.name;
 
         // 紅色圓圈標記連鎖店
-        L.circleMarker([lat, lon], {
+        const marker = L.circleMarker([lat, lon], {
           radius: 6,
           fillColor: "#ff3333",
           color: "#cc0000",
@@ -328,18 +424,26 @@ out center;`;
           .bindPopup(`<b>連鎖店</b><br>${name}`)
           .addTo(storeLayer);
 
+        addDebug(`Marker 已加入: ${name} at [${lat}, ${lon}]`);
+
         count++;
         document.getElementById("storeLog").innerHTML +=
           `<div class="ok">✔ ${name}</div>`;
       });
 
+      addDebug(`storeLayer 內的 Marker 數量: ${Object.keys(storeLayer._layers).length}`);
+
       if (count === 0) {
         document.getElementById("storeLog").innerHTML =
           `<div class="fail">❌ 查無「${keyword}」相關店家</div>`;
+        addDebug(`雖有回應但無有效資料`);
+      } else {
+        addDebug(`成功標記 ${count} 個店家`);
       }
 
     } catch (e) {
       console.error('Overpass API 錯誤:', e);
+      addDebug(`例外錯誤: ${e.message}`);
       document.getElementById("storeLog").innerHTML =
         `<div class="fail">❌ 查詢失敗：${e.message}</div>`;
     }
