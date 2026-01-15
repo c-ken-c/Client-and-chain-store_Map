@@ -154,11 +154,18 @@
     <textarea id="customerInput" rows="10"></textarea>
 
     <h2>🏪 連鎖店關鍵字</h2>
-    <input id="keywordInput" placeholder="例如：振宇五金" />
+    <input id="keywordInput" placeholder="例如：7-11, 全家, 麥當勞" />
 
     <button onclick="runAnalysis()">🔍 執行分析</button>
 
     <hr>
+
+    <div style="background: #fff3cd; padding: 10px; border-radius: 4px; margin-bottom: 10px; font-size: 13px;">
+      <b>💡 連鎖店搜尋說明：</b><br>
+      • 請使用常見連鎖品牌（如：7-11、全家、麥當勞、星巴克）<br>
+      • 小型店家可能不在 OpenStreetMap 資料庫中<br>
+      • 可嘗試：「五金」會搜尋所有五金行
+    </div>
 
     <h2>🧾 客戶地址 Geocoding</h2>
     <div id="customerLog"></div>
@@ -252,7 +259,41 @@
     await geocodeCustomers();
     await searchStores();
     
+    // 自動縮放地圖以顯示所有標記
+    fitMapToMarkers();
+    
     showDebug();
+  }
+
+  /* ========= 自動縮放地圖 ========= */
+  function fitMapToMarkers() {
+    const allMarkers = [];
+    
+    // 收集客戶圖層的所有標記
+    customerLayer.eachLayer(layer => {
+      if (layer.getLatLng) {
+        const latLng = layer.getLatLng();
+        allMarkers.push([latLng.lat, latLng.lng]);
+      }
+    });
+    
+    // 收集店家圖層的所有標記
+    storeLayer.eachLayer(layer => {
+      if (layer.getLatLng) {
+        const latLng = layer.getLatLng();
+        allMarkers.push([latLng.lat, latLng.lng]);
+      }
+    });
+    
+    addDebug(`總共收集到 ${allMarkers.length} 個標記座標`);
+    
+    if (allMarkers.length > 0) {
+      const bounds = L.latLngBounds(allMarkers);
+      map.fitBounds(bounds, { padding: [50, 50] });
+      addDebug(`地圖已縮放至範圍: ${JSON.stringify(bounds)}`);
+    } else {
+      addDebug(`沒有標記可縮放`);
+    }
   }
 
   /* ========= 客戶地址 Geocoding ========= */
