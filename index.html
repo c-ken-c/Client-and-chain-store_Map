@@ -40,6 +40,15 @@
 
     button {
       cursor: pointer;
+      background: #007bff;
+      color: white;
+      border: none;
+      padding: 10px;
+      border-radius: 4px;
+    }
+
+    button:hover {
+      background: #0056b3;
     }
 
     #map {
@@ -47,9 +56,57 @@
     }
 
     .ok { color: green; }
-    .fail { color: red; }
-    .small { font-size: 12px; color: #555; }
+    .fail { 
+      color: #888;
+      font-size: 13px;
+    }
+    .small { 
+      font-size: 12px; 
+      color: #1e90ff;
+      margin-left: 8px;
+    }
     hr { margin: 10px 0; }
+
+    /* 圖例樣式 */
+    .legend {
+      background: white;
+      padding: 12px;
+      border-radius: 6px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+      margin-bottom: 10px;
+    }
+
+    .legend-title {
+      font-weight: bold;
+      margin-bottom: 8px;
+      font-size: 14px;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      margin-bottom: 6px;
+    }
+
+    .legend-circle {
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      margin-right: 8px;
+      border: 2px solid rgba(0,0,0,0.3);
+    }
+
+    .customer-marker {
+      background: #3388ff;
+    }
+
+    .store-marker {
+      background: #ff3333;
+    }
+
+    .legend-text {
+      font-size: 13px;
+    }
   </style>
 </head>
 
@@ -57,6 +114,19 @@
 <div class="container">
   <!-- 左側控制面板 -->
   <div class="panel">
+    <!-- 圖例說明 -->
+    <div class="legend">
+      <div class="legend-title">📊 地圖圖例</div>
+      <div class="legend-item">
+        <div class="legend-circle customer-marker"></div>
+        <span class="legend-text">客戶地址</span>
+      </div>
+      <div class="legend-item">
+        <div class="legend-circle store-marker"></div>
+        <span class="legend-text">連鎖店位置</span>
+      </div>
+    </div>
+
     <h2>📍 客戶地址（一行一筆）</h2>
     <textarea id="customerInput" rows="10"></textarea>
 
@@ -107,6 +177,13 @@
 
   /* ========= 主流程 ========= */
   async function runAnalysis() {
+    // 驗證關鍵字不可為空
+    const keyword = document.getElementById("keywordInput").value.trim();
+    if (!keyword) {
+      alert("請輸入連鎖店關鍵字！");
+      return;
+    }
+
     customerLayer.clearLayers();
     storeLayer.clearLayers();
 
@@ -147,16 +224,24 @@
           const lat = data[0].lat;
           const lon = data[0].lon;
 
-          L.marker([lat, lon])
-            .bindPopup(`<b>客戶</b><br>${line}`)
+          // 藍色圓圈標記客戶
+          L.circleMarker([lat, lon], {
+            radius: 8,
+            fillColor: "#3388ff",
+            color: "#2277ee",
+            weight: 2,
+            opacity: 1,
+            fillOpacity: 0.7
+          })
+            .bindPopup(`<b>客戶地址</b><br>${line}`)
             .addTo(customerLayer);
 
-          logCustomer(`✔ ${line}<div class="small">➜ ${query}</div>`, true);
+          logCustomer(`✔ ${line} <span class="small">➜ ${query}</span>`, true);
         } else {
-          logCustomer(`✖ ${line}<div class="small">➜ ${query}</div>`, false);
+          logCustomer(`✖ ${line} <span class="small">➜ ${query}</span>`, false);
         }
       } catch (e) {
-        logCustomer(`✖ ${line}（例外錯誤）`, false);
+        logCustomer(`✖ ${line} <span class="small">（例外錯誤）</span>`, false);
       }
 
       await sleep(900); // 避免被 API 擋
@@ -208,10 +293,16 @@
         const lon = el.lon || el.center.lon;
         const name = el.tags.name;
 
+        // 紅色圓圈標記連鎖店
         L.circleMarker([lat, lon], {
-          radius: 6
+          radius: 6,
+          fillColor: "#ff3333",
+          color: "#cc0000",
+          weight: 2,
+          opacity: 1,
+          fillOpacity: 0.7
         })
-          .bindPopup(`<b>${name}</b>`)
+          .bindPopup(`<b>連鎖店</b><br>${name}`)
           .addTo(storeLayer);
 
         document.getElementById("storeLog").innerHTML +=
