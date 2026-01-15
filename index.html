@@ -1,592 +1,191 @@
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
-  <meta charset="utf-8" />
-  <title>客戶 × 連鎖店 密度分析</title>
+<meta charset="utf-8" />
+<title>客戶 × 連鎖店 密度分析</title>
 
-  <link
-    rel="stylesheet"
-    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-  />
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 
-  <style>
-    body {
-      margin: 0;
-      font-family: Arial, "Microsoft JhengHei", sans-serif;
-    }
+<style>
+body {
+  margin: 0;
+  font-family: Arial, "Microsoft JhengHei", sans-serif;
+}
+.container {
+  display: grid;
+  grid-template-columns: 420px 1fr;
+  height: 100vh;
+}
+.panel {
+  padding: 10px;
+  overflow-y: auto;
+  border-right: 1px solid #ccc;
+}
+textarea, input, button {
+  width: 100%;
+  margin-bottom: 6px;
+  padding: 6px;
+  font-size: 14px;
+}
+button {
+  cursor: pointer;
+  background: #007bff;
+  color: white;
+  border: none;
+  border-radius: 4px;
+}
+button:hover { background: #0056b3; }
+#map { height: 100%; }
 
-    h2 {
-      margin: 8px 0;
-    }
-
-    .container {
-      display: grid;
-      grid-template-columns: 420px 1fr;
-      height: 100vh;
-    }
-
-    .panel {
-      padding: 10px;
-      overflow-y: auto;
-      border-right: 1px solid #ccc;
-    }
-
-    textarea, input, button {
-      width: 100%;
-      margin-bottom: 6px;
-      padding: 6px;
-      font-size: 14px;
-    }
-
-    button {
-      cursor: pointer;
-      background: #007bff;
-      color: white;
-      border: none;
-      padding: 10px;
-      border-radius: 4px;
-    }
-
-    button:hover {
-      background: #0056b3;
-    }
-
-    #map {
-      height: 100%;
-    }
-
-    .ok { color: green; }
-    .fail { 
-      color: #888;
-      font-size: 13px;
-    }
-    .small { 
-      font-size: 12px; 
-      color: #1e90ff;
-      margin-left: 8px;
-    }
-    hr { margin: 10px 0; }
-
-    /* 圖例樣式 */
-    .legend {
-      background: white;
-      padding: 12px;
-      border-radius: 6px;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-      margin-bottom: 10px;
-    }
-
-    .legend-title {
-      font-weight: bold;
-      margin-bottom: 8px;
-      font-size: 14px;
-    }
-
-    .legend-item {
-      display: flex;
-      align-items: center;
-      margin-bottom: 6px;
-    }
-
-    .legend-circle {
-      width: 16px;
-      height: 16px;
-      border-radius: 50%;
-      margin-right: 8px;
-      border: 2px solid rgba(0,0,0,0.3);
-    }
-
-    .customer-marker {
-      background: #3388ff;
-    }
-
-    .store-marker {
-      background: #ff3333;
-    }
-
-    .legend-text {
-      font-size: 13px;
-    }
-
-    /* 除錯面板 */
-    .debug-section {
-      background: #f8f9fa;
-      padding: 10px;
-      border-radius: 4px;
-      margin-top: 10px;
-      font-size: 12px;
-      font-family: monospace;
-      max-height: 200px;
-      overflow-y: auto;
-    }
-
-    .debug-title {
-      font-weight: bold;
-      color: #666;
-      margin-bottom: 5px;
-    }
-
-    .debug-item {
-      padding: 3px 0;
-      border-bottom: 1px solid #ddd;
-    }
-  </style>
+.ok { color: green; }
+.fail { color: #888; font-size: 13px; }
+.small { font-size: 12px; color: #1e90ff; margin-left: 8px; }
+hr { margin: 10px 0; }
+</style>
 </head>
 
 <body>
 <div class="container">
-  <!-- 左側控制面板 -->
-  <div class="panel">
-    <!-- 圖例說明 -->
-    <div class="legend">
-      <div class="legend-title">📊 地圖圖例</div>
-      <div class="legend-item">
-        <div class="legend-circle customer-marker"></div>
-        <span class="legend-text">客戶地址</span>
-      </div>
-      <div class="legend-item">
-        <div class="legend-circle store-marker"></div>
-        <span class="legend-text">連鎖店位置</span>
-      </div>
-    </div>
 
-    <h2>📍 客戶地址（一行一筆）</h2>
-    <textarea id="customerInput" rows="10"></textarea>
+<div class="panel">
 
-    <h2>🏪 連鎖店關鍵字</h2>
-    <input id="keywordInput" placeholder="例如：7-11, 全家, 麥當勞" />
+<h2>📍 客戶地址（一行一筆）｜圖例：藍色圓圈</h2>
+<textarea id="customerInput" rows="8"></textarea>
 
-    <button onclick="runAnalysis()">🔍 執行分析</button>
+<h2>🏪 連鎖店地址（一行一筆）｜圖例：紅色圓圈</h2>
+<textarea id="storeAddrInput" rows="6"></textarea>
 
-    <hr>
+<h2>🏪 連鎖店關鍵字｜圖例：綠色圓圈</h2>
+<input id="keywordInput" placeholder="例如：振宇五金、7-11（可留空）" />
 
-    <div style="background: #fff3cd; padding: 10px; border-radius: 4px; margin-bottom: 10px; font-size: 13px;">
-      <b>💡 連鎖店搜尋說明：</b><br>
-      • 請使用常見連鎖品牌（如：7-11、全家、麥當勞、星巴克）<br>
-      • 小型店家可能不在 OpenStreetMap 資料庫中<br>
-      • 可嘗試：「五金」會搜尋所有五金行
-    </div>
+<button onclick="runAnalysis()">🔍 執行分析</button>
 
-    <h2>🧾 客戶地址 Geocoding</h2>
-    <div id="customerLog"></div>
+<hr>
 
-    <hr>
+<h2>🧾 客戶地址 Geocoding</h2>
+<div id="customerLog"></div>
 
-    <h2>🏪 連鎖店搜尋</h2>
-    <div id="storeLog"></div>
+<hr>
 
-    <!-- 除錯資訊 -->
-    <div class="debug-section" id="debugSection" style="display:none;">
-      <div class="debug-title">🐛 除錯資訊</div>
-      <div id="debugLog"></div>
-    </div>
-  </div>
+<h2>🏪 連鎖店搜尋</h2>
+<div id="storeLog"></div>
 
-  <!-- 右側地圖 -->
-  <div id="map"></div>
+</div>
+
+<div id="map"></div>
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
 <script>
-  /* ========= 地圖初始化 ========= */
-  const map = L.map("map").setView([23.7, 121], 7);
+const map = L.map("map").setView([23.7, 121], 7);
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  attribution: "© OpenStreetMap"
+}).addTo(map);
 
-  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    attribution: "© OpenStreetMap"
-  }).addTo(map);
+const customerLayer = L.layerGroup().addTo(map);
+const storeLayer = L.layerGroup().addTo(map);
 
-  const customerLayer = L.layerGroup().addTo(map);
-  const storeLayer = L.layerGroup().addTo(map);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const cleanAddress = l => l.includes("：") ? l.split("：")[1].trim() : l.trim();
 
-  // 除錯用的全域陣列
-  let debugInfo = [];
+async function runAnalysis() {
+  customerLayer.clearLayers();
+  storeLayer.clearLayers();
+  customerLog.innerHTML = "";
+  storeLog.innerHTML = "";
 
-  function addDebug(msg) {
-    debugInfo.push(msg);
-    console.log('[DEBUG]', msg);
-  }
+  await geocodeList(customerInput.value, "customer");
+  await geocodeList(storeAddrInput.value, "storeAddr");
+  await searchByKeyword();
+  fitAll();
+}
 
-  function showDebug() {
-    const debugSection = document.getElementById('debugSection');
-    const debugLog = document.getElementById('debugLog');
-    
-    if (debugInfo.length > 0) {
-      debugSection.style.display = 'block';
-      debugLog.innerHTML = debugInfo.map(msg => 
-        `<div class="debug-item">${msg}</div>`
-      ).join('');
-    }
-  }
+async function geocodeList(text, type) {
+  const lines = text.split("\n").filter(l => l.trim());
+  for (const line of lines) {
+    const addr = cleanAddress(line) + " 台灣";
+    const url = "https://nominatim.openstreetmap.org/search?" +
+      new URLSearchParams({ q: addr, format: "json", limit: 1, countrycodes: "tw" });
 
-  function clearDebug() {
-    debugInfo = [];
-    document.getElementById('debugSection').style.display = 'none';
-    document.getElementById('debugLog').innerHTML = '';
-  }
+    const res = await fetch(url);
+    const data = await res.json();
 
-  /* ========= 工具函式 ========= */
-  function sleep(ms) {
-    return new Promise(r => setTimeout(r, ms));
-  }
+    if (data.length) {
+      const lat = +data[0].lat;
+      const lon = +data[0].lon;
 
-  function cleanAddress(line) {
-    if (line.includes("：")) {
-      return line.split("：")[1].trim();
-    }
-    return line.trim();
-  }
-
-  /* ========= 主流程 ========= */
-  async function runAnalysis() {
-    clearDebug();
-    
-    // 驗證關鍵字不可為空
-    const keyword = document.getElementById("keywordInput").value.trim();
-    if (!keyword) {
-      alert("請輸入連鎖店關鍵字！");
-      return;
-    }
-
-    addDebug(`開始分析 - 關鍵字: ${keyword}`);
-
-    customerLayer.clearLayers();
-    storeLayer.clearLayers();
-
-    document.getElementById("customerLog").innerHTML = "";
-    document.getElementById("storeLog").innerHTML = "";
-
-    await geocodeCustomers();
-    await searchStores();
-    
-    // 自動縮放地圖以顯示所有標記
-    fitMapToMarkers();
-    
-    showDebug();
-  }
-
-  /* ========= 自動縮放地圖 ========= */
-  function fitMapToMarkers() {
-    const allMarkers = [];
-    
-    // 收集客戶圖層的所有標記
-    customerLayer.eachLayer(layer => {
-      if (layer.getLatLng) {
-        const latLng = layer.getLatLng();
-        allMarkers.push([latLng.lat, latLng.lng]);
-        addDebug(`客戶標記: [${latLng.lat}, ${latLng.lng}]`);
-      }
-    });
-    
-    // 收集店家圖層的所有標記
-    storeLayer.eachLayer(layer => {
-      if (layer.getLatLng) {
-        const latLng = layer.getLatLng();
-        allMarkers.push([latLng.lat, latLng.lng]);
-        addDebug(`店家標記: [${latLng.lat}, ${latLng.lng}]`);
-      }
-    });
-    
-    addDebug(`總共收集到 ${allMarkers.length} 個標記座標`);
-    
-    if (allMarkers.length > 0) {
-      const bounds = L.latLngBounds(allMarkers);
-      map.fitBounds(bounds, { 
-        padding: [50, 50],
-        maxZoom: 12  // 限制最大縮放層級，避免太近
-      });
-      addDebug(`地圖已縮放至範圍: ${JSON.stringify(bounds)}`);
-      
-      // 強制重繪
-      setTimeout(() => {
-        map.invalidateSize();
-        addDebug(`地圖已重繪`);
-      }, 100);
+      drawPoint(lat, lon, type, line);
+      log(type === "customer" ? customerLog : storeLog,
+          `✔ ${line}<span class="small">➜ ${addr}</span>`, true);
     } else {
-      addDebug(`沒有標記可縮放`);
+      log(type === "customer" ? customerLog : storeLog,
+          `✖ ${line}`, false);
     }
+    await sleep(900);
   }
+}
 
-  /* ========= 客戶地址 Geocoding ========= */
-  async function geocodeCustomers() {
-    const lines = document
-      .getElementById("customerInput")
-      .value
-      .split("\n")
-      .filter(l => l.trim() !== "");
+function drawPoint(lat, lon, type, label) {
+  const cfg = {
+    customer: { c:"#1e90ff", fill:"#1e90ff" },
+    storeAddr:{ c:"#d93025", fill:"#d93025" },
+    keyword:{ c:"#188038", fill:"#188038" }
+  }[type];
 
-    addDebug(`客戶地址總數: ${lines.length}`);
+  L.circleMarker([lat, lon], {
+    radius: 4,
+    color: cfg.c,
+    fillColor: cfg.fill,
+    fillOpacity: 1
+  }).bindPopup(label).addTo(type==="customer"?customerLayer:storeLayer);
 
-    let successCount = 0;
+  L.circle([lat, lon], {
+    radius: 3000,
+    color: cfg.c,
+    fillColor: cfg.fill,
+    fillOpacity: 0.15,
+    weight: 1
+  }).addTo(type==="customer"?customerLayer:storeLayer);
+}
 
-    for (const line of lines) {
-      const addr = cleanAddress(line);
-      
-      // 嘗試多種查詢策略
-      let result = null;
-      
-      // 策略 1: 完整地址
-      result = await tryGeocode(addr + " 台灣", line);
-      
-      // 策略 2: 如果失敗，移除門牌號碼再試一次（只保留路名）
-      if (!result) {
-        const addrWithoutNumber = addr.replace(/\d+號?$/, '').trim();
-        if (addrWithoutNumber !== addr) {
-          addDebug(`嘗試移除門牌號碼: ${addrWithoutNumber}`);
-          result = await tryGeocode(addrWithoutNumber + " 台灣", line);
-        }
-      }
-      
-      // 策略 3: 如果還是失敗，只保留到區
-      if (!result) {
-        const match = addr.match(/(.*?[市縣].*?[區鄉鎮市])/);
-        if (match) {
-          const districtOnly = match[1];
-          addDebug(`嘗試只用區域: ${districtOnly}`);
-          result = await tryGeocode(districtOnly + " 台灣", line);
-        }
-      }
+async function searchByKeyword() {
+  const keyword = keywordInput.value.trim();
+  if (!keyword) return;
 
-      if (result) {
-        successCount++;
-        logCustomer(`✔ ${line} <span class="small">➜ ${result.query}</span>`, true);
-      } else {
-        logCustomer(`✖ ${line} <span class="small">➜ 無法定位</span>`, false);
-      }
-
-      await sleep(1000); // 避免被 API 擋
-    }
-
-    addDebug(`客戶地址成功定位: ${successCount}/${lines.length}`);
-    addDebug(`customerLayer 內的 Marker 數量: ${Object.keys(customerLayer._layers).length}`);
-  }
-
-  async function tryGeocode(query, originalLine) {
-    const url =
-      "https://nominatim.openstreetmap.org/search?" +
-      new URLSearchParams({
-        q: query,
-        format: "json",
-        limit: 1,
-        countrycodes: "tw"
-      });
-
-    addDebug(`查詢: ${query}`);
-
-    try {
-      const res = await fetch(url, {
-        headers: { "Accept-Language": "zh-TW" }
-      });
-      const data = await res.json();
-
-      addDebug(`回應資料長度: ${data.length}`);
-
-      if (data.length > 0) {
-        const lat = parseFloat(data[0].lat);
-        const lon = parseFloat(data[0].lon);
-
-        addDebug(`✓ ${originalLine} => (${lat}, ${lon})`);
-
-        // 藍色圓圈標記客戶 - 確保參數正確
-        const marker = L.circleMarker([lat, lon], {
-          radius: 8,
-          fillColor: "#3388ff",
-          color: "#2277ee",
-          weight: 2,
-          opacity: 1,
-          fillOpacity: 0.7
-        });
-        
-        marker.bindPopup(`<b>客戶地址</b><br>${originalLine}<br><small>定位: ${query}</small>`);
-        marker.addTo(customerLayer);
-
-        addDebug(`Marker 已加入圖層，座標: [${lat}, ${lon}], 類型: ${marker instanceof L.CircleMarker}`);
-
-        // 強制重繪圖層
-        map.invalidateSize();
-
-        return { lat, lon, query };
-      }
-      
-      addDebug(`✗ 查無結果`);
-      return null;
-      
-    } catch (e) {
-      addDebug(`✗ 例外: ${e.message}`);
-      return null;
-    }
-  }
-
-  function logCustomer(text, ok) {
-    const div = document.createElement("div");
-    div.className = ok ? "ok" : "fail";
-    div.innerHTML = text;
-    document.getElementById("customerLog").appendChild(div);
-  }
-
-  /* ========= 連鎖店搜尋（Overpass） ========= */
-  async function searchStores() {
-    const keyword = document.getElementById("keywordInput").value.trim();
-    if (!keyword) return;
-
-    addDebug(`Overpass 查詢: ${keyword}`);
-
-    document.getElementById("storeLog").innerHTML = "🔍 查詢中…";
-
-    // 嘗試多種搜尋策略
-    let stores = [];
-    
-    // 策略 1: 使用 area 方式（您原本的版本，對某些資料較有效）
-    stores = await searchOverpass(keyword, 'area');
-    
-    // 策略 2: 如果沒結果，用 bounding box 精確搜尋
-    if (stores.length === 0) {
-      addDebug(`area 查詢無結果，嘗試 bbox 方式`);
-      stores = await searchOverpass(keyword, 'bbox');
-    }
-    
-    // 策略 3: 如果是五金相關，搜尋 shop 標籤
-    if (stores.length === 0 && keyword.includes('五金')) {
-      addDebug(`嘗試搜尋 shop=hardware`);
-      stores = await searchOverpass(keyword, 'shop');
-    }
-    
-    // 策略 4: 搜尋 amenity 標籤
-    if (stores.length === 0) {
-      addDebug(`嘗試搜尋 amenity`);
-      stores = await searchOverpass(keyword, 'amenity');
-    }
-
-    document.getElementById("storeLog").innerHTML = "";
-
-    if (stores.length === 0) {
-      document.getElementById("storeLog").innerHTML =
-        `<div class="fail">❌ 查無「${keyword}」相關店家<br><small>建議: 1) 換個關鍵字試試 2) OSM 可能無此資料</small></div>`;
-      addDebug(`所有策略都查無結果`);
-      return;
-    }
-
-    // 顯示找到的店家
-    stores.forEach(store => {
-      const marker = L.circleMarker([store.lat, store.lon], {
-        radius: 6,
-        fillColor: "#ff3333",
-        color: "#cc0000",
-        weight: 2,
-        opacity: 1,
-        fillOpacity: 0.7
-      });
-      
-      marker.bindPopup(`<b>連鎖店</b><br>${store.name}`);
-      marker.addTo(storeLayer);
-
-      document.getElementById("storeLog").innerHTML +=
-        `<div class="ok">✔ ${store.name}</div>`;
-    });
-
-    addDebug(`成功標記 ${stores.length} 個店家`);
-    addDebug(`storeLayer 內的 Marker 數量: ${Object.keys(storeLayer._layers).length}`);
-  }
-
-  async function searchOverpass(keyword, searchType) {
-    let query;
-    
-    // 策略選擇：先用 area 查詢（您之前的版本），失敗再用 bbox
-    if (searchType === 'area') {
-      // 使用 area 方式（您原本的版本）
-      query = `[out:json][timeout:30];
-area["name"="臺灣"]["admin_level"="2"]->.a;
+  const query = `[out:json][timeout:25];
 (
-  node["name"~"${keyword}",i](area.a);
-  way["name"~"${keyword}",i](area.a);
+ node["name"~"${keyword}",i](21.8,120,25.4,122.1);
+ way["name"~"${keyword}",i](21.8,120,25.4,122.1);
 );
 out center;`;
-    } else if (searchType === 'shop') {
-      // 搜尋五金行（使用 bbox）
-      query = `[out:json][timeout:30];
-(
-  node["shop"="hardware"]["name"~"${keyword}",i](21.8,120.0,25.4,122.1);
-  way["shop"="hardware"]["name"~"${keyword}",i](21.8,120.0,25.4,122.1);
-  node["shop"="doityourself"]["name"~"${keyword}",i](21.8,120.0,25.4,122.1);
-  way["shop"="doityourself"]["name"~"${keyword}",i](21.8,120.0,25.4,122.1);
-);
-out center;`;
-    } else if (searchType === 'amenity') {
-      // 搜尋設施（使用 bbox）
-      query = `[out:json][timeout:30];
-(
-  node["amenity"]["name"~"${keyword}",i](21.8,120.0,25.4,122.1);
-  way["amenity"]["name"~"${keyword}",i](21.8,120.0,25.4,122.1);
-);
-out center;`;
-    } else {
-      // bbox 方式
-      query = `[out:json][timeout:30];
-(
-  node["name"~"${keyword}",i](21.8,120.0,25.4,122.1);
-  way["name"~"${keyword}",i](21.8,120.0,25.4,122.1);
-);
-out center;`;
-    }
 
-    addDebug(`查詢類型: ${searchType}, 語法長度: ${query.length} 字元`);
+  const res = await fetch("https://overpass-api.de/api/interpreter", {
+    method:"POST", body:query
+  });
+  const data = await res.json();
 
-    try {
-      const res = await fetch(
-        "https://overpass-api.de/api/interpreter",
-        { 
-          method: "POST", 
-          body: query,
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded'
-          }
-        }
-      );
+  data.elements?.forEach(el => {
+    const lat = el.lat || el.center.lat;
+    const lon = el.lon || el.center.lon;
+    drawPoint(lat, lon, "keyword", el.tags.name);
+    storeLog.innerHTML += `<div class="ok">✔ ${el.tags.name}</div>`;
+  });
+}
 
-      addDebug(`HTTP 狀態: ${res.status} ${res.statusText}`);
+function fitAll() {
+  const pts = [];
+  customerLayer.eachLayer(l => l.getLatLng && pts.push(l.getLatLng()));
+  storeLayer.eachLayer(l => l.getLatLng && pts.push(l.getLatLng()));
+  if (pts.length) map.fitBounds(pts, { padding:[50,50], maxZoom:12 });
+}
 
-      if (!res.ok) {
-        const errorText = await res.text();
-        addDebug(`錯誤回應: ${errorText.substring(0, 200)}`);
-        return [];
-      }
-
-      const data = await res.json();
-      addDebug(`回應元素數量 (${searchType}): ${data.elements ? data.elements.length : 0}`);
-
-      const stores = [];
-
-      if (data.elements && data.elements.length > 0) {
-        data.elements.forEach((el, index) => {
-          let lat, lon;
-
-          if (el.type === 'node') {
-            lat = el.lat;
-            lon = el.lon;
-          } else if (el.center) {
-            lat = el.center.lat;
-            lon = el.center.lon;
-          }
-
-          if (lat && lon && el.tags && el.tags.name) {
-            stores.push({
-              name: el.tags.name,
-              lat: parseFloat(lat),
-              lon: parseFloat(lon)
-            });
-            addDebug(`找到: ${el.tags.name} at [${lat}, ${lon}]`);
-          }
-        });
-      }
-
-      return stores;
-
-    } catch (e) {
-      console.error('Overpass API 錯誤:', e);
-      addDebug(`例外錯誤 (${searchType}): ${e.message}`);
-      return [];
-    }
-  }
+function log(el, text, ok) {
+  const d = document.createElement("div");
+  d.className = ok ? "ok" : "fail";
+  d.innerHTML = text;
+  el.appendChild(d);
+}
 </script>
 </body>
 </html>
