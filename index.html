@@ -16,12 +16,21 @@
     }
 
     h2 {
-      margin: 8px 0;
+      margin: 12px 0 8px 0;
+      font-size: 16px;
+    }
+
+    .legend-inline {
+      display: inline-block;
+      margin-left: 8px;
+      font-size: 13px;
+      color: #666;
+      font-weight: normal;
     }
 
     .container {
       display: grid;
-      grid-template-columns: 420px 1fr;
+      grid-template-columns: 450px 1fr;
       height: 100vh;
     }
 
@@ -36,6 +45,10 @@
       margin-bottom: 6px;
       padding: 6px;
       font-size: 14px;
+    }
+
+    textarea {
+      resize: vertical;
     }
 
     button {
@@ -67,47 +80,6 @@
     }
     hr { margin: 10px 0; }
 
-    /* 圖例樣式 */
-    .legend {
-      background: white;
-      padding: 12px;
-      border-radius: 6px;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-      margin-bottom: 10px;
-    }
-
-    .legend-title {
-      font-weight: bold;
-      margin-bottom: 8px;
-      font-size: 14px;
-    }
-
-    .legend-item {
-      display: flex;
-      align-items: center;
-      margin-bottom: 6px;
-    }
-
-    .legend-circle {
-      width: 16px;
-      height: 16px;
-      border-radius: 50%;
-      margin-right: 8px;
-      border: 2px solid rgba(0,0,0,0.3);
-    }
-
-    .customer-marker {
-      background: #3388ff;
-    }
-
-    .store-marker {
-      background: #ff3333;
-    }
-
-    .legend-text {
-      font-size: 13px;
-    }
-
     /* 除錯面板 */
     .debug-section {
       background: #f8f9fa;
@@ -130,6 +102,14 @@
       padding: 3px 0;
       border-bottom: 1px solid #ddd;
     }
+
+    .tip-box {
+      background: #fff3cd;
+      padding: 10px;
+      border-radius: 4px;
+      margin-bottom: 10px;
+      font-size: 13px;
+    }
   </style>
 </head>
 
@@ -137,43 +117,38 @@
 <div class="container">
   <!-- 左側控制面板 -->
   <div class="panel">
-    <!-- 圖例說明 -->
-    <div class="legend">
-      <div class="legend-title">📊 地圖圖例</div>
-      <div class="legend-item">
-        <div class="legend-circle customer-marker"></div>
-        <span class="legend-text">客戶地址</span>
-      </div>
-      <div class="legend-item">
-        <div class="legend-circle store-marker"></div>
-        <span class="legend-text">連鎖店位置</span>
-      </div>
-    </div>
+    <h2>📍 客戶地址 (一行一筆) <span class="legend-inline">圖例: 🔵 藍色圓點</span></h2>
+    <textarea id="customerInput" rows="8"></textarea>
 
-    <h2>📍 客戶地址（一行一筆）</h2>
-    <textarea id="customerInput" rows="10"></textarea>
+    <h2>🏪 連鎖店地址 (一行一筆) <span class="legend-inline">圖例: 🔴 紅色圓點 + 3km淡紅圈</span></h2>
+    <textarea id="storeAddressInput" rows="6"></textarea>
 
-    <h2>🏪 連鎖店關鍵字</h2>
+    <h2>🏪 連鎖店關鍵字 <span class="legend-inline">圖例: 🟢 綠色圓點 + 3km淡綠圈</span></h2>
     <input id="keywordInput" placeholder="例如：7-11, 全家, 麥當勞" />
 
     <button onclick="runAnalysis()">🔍 執行分析</button>
 
-    <hr>
-
-    <div style="background: #fff3cd; padding: 10px; border-radius: 4px; margin-bottom: 10px; font-size: 13px;">
-      <b>💡 連鎖店搜尋說明：</b><br>
-      • 請使用常見連鎖品牌（如：7-11、全家、麥當勞、星巴克）<br>
-      • 小型店家可能不在 OpenStreetMap 資料庫中<br>
-      • 可嘗試：「五金」會搜尋所有五金行
+    <div class="tip-box">
+      <b>💡 說明：</b><br>
+      • 客戶地址：只顯示藍色圓點<br>
+      • 連鎖店地址：紅色圓點 + 3km 淡紅色圓圈<br>
+      • 連鎖店關鍵字：綠色圓點 + 3km 淡綠色圓圈
     </div>
+
+    <hr>
 
     <h2>🧾 客戶地址 Geocoding</h2>
     <div id="customerLog"></div>
 
     <hr>
 
-    <h2>🏪 連鎖店搜尋</h2>
-    <div id="storeLog"></div>
+    <h2>🏪 連鎖店地址 Geocoding</h2>
+    <div id="storeAddressLog"></div>
+
+    <hr>
+
+    <h2>🏪 連鎖店關鍵字搜尋</h2>
+    <div id="storeKeywordLog"></div>
 
     <!-- 除錯資訊 -->
     <div class="debug-section" id="debugSection" style="display:none;">
@@ -197,7 +172,8 @@
   }).addTo(map);
 
   const customerLayer = L.layerGroup().addTo(map);
-  const storeLayer = L.layerGroup().addTo(map);
+  const storeAddressLayer = L.layerGroup().addTo(map);
+  const storeKeywordLayer = L.layerGroup().addTo(map);
 
   // 除錯用的全域陣列
   let debugInfo = [];
@@ -240,24 +216,20 @@
   /* ========= 主流程 ========= */
   async function runAnalysis() {
     clearDebug();
-    
-    // 驗證關鍵字不可為空
-    const keyword = document.getElementById("keywordInput").value.trim();
-    if (!keyword) {
-      alert("請輸入連鎖店關鍵字！");
-      return;
-    }
 
-    addDebug(`開始分析 - 關鍵字: ${keyword}`);
+    addDebug(`開始分析`);
 
     customerLayer.clearLayers();
-    storeLayer.clearLayers();
+    storeAddressLayer.clearLayers();
+    storeKeywordLayer.clearLayers();
 
     document.getElementById("customerLog").innerHTML = "";
-    document.getElementById("storeLog").innerHTML = "";
+    document.getElementById("storeAddressLog").innerHTML = "";
+    document.getElementById("storeKeywordLog").innerHTML = "";
 
     await geocodeCustomers();
-    await searchStores();
+    await geocodeStoreAddresses();
+    await searchStoresByKeyword();
     
     // 自動縮放地圖以顯示所有標記
     fitMapToMarkers();
@@ -269,22 +241,14 @@
   function fitMapToMarkers() {
     const allMarkers = [];
     
-    // 收集客戶圖層的所有標記
-    customerLayer.eachLayer(layer => {
-      if (layer.getLatLng) {
-        const latLng = layer.getLatLng();
-        allMarkers.push([latLng.lat, latLng.lng]);
-        addDebug(`客戶標記: [${latLng.lat}, ${latLng.lng}]`);
-      }
-    });
-    
-    // 收集店家圖層的所有標記
-    storeLayer.eachLayer(layer => {
-      if (layer.getLatLng) {
-        const latLng = layer.getLatLng();
-        allMarkers.push([latLng.lat, latLng.lng]);
-        addDebug(`店家標記: [${latLng.lat}, ${latLng.lng}]`);
-      }
+    // 收集所有圖層的標記
+    [customerLayer, storeAddressLayer, storeKeywordLayer].forEach(layer => {
+      layer.eachLayer(l => {
+        if (l.getLatLng) {
+          const latLng = l.getLatLng();
+          allMarkers.push([latLng.lat, latLng.lng]);
+        }
+      });
     });
     
     addDebug(`總共收集到 ${allMarkers.length} 個標記座標`);
@@ -293,17 +257,11 @@
       const bounds = L.latLngBounds(allMarkers);
       map.fitBounds(bounds, { 
         padding: [50, 50],
-        maxZoom: 12  // 限制最大縮放層級，避免太近
+        maxZoom: 12
       });
-      addDebug(`地圖已縮放至範圍: ${JSON.stringify(bounds)}`);
+      addDebug(`地圖已縮放`);
       
-      // 強制重繪
-      setTimeout(() => {
-        map.invalidateSize();
-        addDebug(`地圖已重繪`);
-      }, 100);
-    } else {
-      addDebug(`沒有標記可縮放`);
+      setTimeout(() => map.invalidateSize(), 100);
     }
   }
 
@@ -315,20 +273,18 @@
       .split("\n")
       .filter(l => l.trim() !== "");
 
+    if (lines.length === 0) return;
+
     addDebug(`客戶地址總數: ${lines.length}`);
 
     let successCount = 0;
 
     for (const line of lines) {
       const addr = cleanAddress(line);
-      
-      // 嘗試多種查詢策略
       let result = null;
       
-      // 策略 1: 完整地址
       result = await tryGeocode(addr + " 台灣", line);
       
-      // 策略 2: 如果失敗，移除門牌號碼再試一次（只保留路名）
       if (!result) {
         const addrWithoutNumber = addr.replace(/\d+號?$/, '').trim();
         if (addrWithoutNumber !== addr) {
@@ -337,7 +293,6 @@
         }
       }
       
-      // 策略 3: 如果還是失敗，只保留到區
       if (!result) {
         const match = addr.match(/(.*?[市縣].*?[區鄉鎮市])/);
         if (match) {
@@ -349,16 +304,29 @@
 
       if (result) {
         successCount++;
+        
+        // 藍色圓點（半徑縮小為原本一半）
+        const marker = L.circleMarker([result.lat, result.lon], {
+          radius: 3,
+          fillColor: "#3388ff",
+          color: "#2277ee",
+          weight: 1,
+          opacity: 1,
+          fillOpacity: 0.9
+        });
+        
+        marker.bindPopup(`<b>客戶地址</b><br>${line}<br><small>定位: ${result.query}</small>`);
+        marker.addTo(customerLayer);
+        
         logCustomer(`✔ ${line} <span class="small">➜ ${result.query}</span>`, true);
       } else {
         logCustomer(`✖ ${line} <span class="small">➜ 無法定位</span>`, false);
       }
 
-      await sleep(1000); // 避免被 API 擋
+      await sleep(1000);
     }
 
     addDebug(`客戶地址成功定位: ${successCount}/${lines.length}`);
-    addDebug(`customerLayer 內的 Marker 數量: ${Object.keys(customerLayer._layers).length}`);
   }
 
   async function tryGeocode(query, originalLine) {
@@ -387,24 +355,6 @@
 
         addDebug(`✓ ${originalLine} => (${lat}, ${lon})`);
 
-        // 藍色圓圈標記客戶 - 確保參數正確
-        const marker = L.circleMarker([lat, lon], {
-          radius: 8,
-          fillColor: "#3388ff",
-          color: "#2277ee",
-          weight: 2,
-          opacity: 1,
-          fillOpacity: 0.7
-        });
-        
-        marker.bindPopup(`<b>客戶地址</b><br>${originalLine}<br><small>定位: ${query}</small>`);
-        marker.addTo(customerLayer);
-
-        addDebug(`Marker 已加入圖層，座標: [${lat}, ${lon}], 類型: ${marker instanceof L.CircleMarker}`);
-
-        // 強制重繪圖層
-        map.invalidateSize();
-
         return { lat, lon, query };
       }
       
@@ -424,76 +374,156 @@
     document.getElementById("customerLog").appendChild(div);
   }
 
-  /* ========= 連鎖店搜尋（Overpass） ========= */
-  async function searchStores() {
+  /* ========= 連鎖店地址 Geocoding ========= */
+  async function geocodeStoreAddresses() {
+    const lines = document
+      .getElementById("storeAddressInput")
+      .value
+      .split("\n")
+      .filter(l => l.trim() !== "");
+
+    if (lines.length === 0) return;
+
+    addDebug(`連鎖店地址總數: ${lines.length}`);
+
+    let successCount = 0;
+
+    for (const line of lines) {
+      const addr = cleanAddress(line);
+      let result = null;
+      
+      result = await tryGeocode(addr + " 台灣", line);
+      
+      if (!result) {
+        const addrWithoutNumber = addr.replace(/\d+號?$/, '').trim();
+        if (addrWithoutNumber !== addr) {
+          result = await tryGeocode(addrWithoutNumber + " 台灣", line);
+        }
+      }
+      
+      if (!result) {
+        const match = addr.match(/(.*?[市縣].*?[區鄉鎮市])/);
+        if (match) {
+          result = await tryGeocode(match[1] + " 台灣", line);
+        }
+      }
+
+      if (result) {
+        successCount++;
+        
+        // 紅色圓點
+        const marker = L.circleMarker([result.lat, result.lon], {
+          radius: 3,
+          fillColor: "#ff3333",
+          color: "#cc0000",
+          weight: 1,
+          opacity: 1,
+          fillOpacity: 0.9
+        });
+        
+        marker.bindPopup(`<b>連鎖店地址</b><br>${line}`);
+        marker.addTo(storeAddressLayer);
+        
+        // 3km 淡紅色圓圈（半透明）
+        L.circle([result.lat, result.lon], {
+          radius: 3000,
+          color: "#ff6666",
+          fillColor: "#ff9999",
+          weight: 2,
+          opacity: 0.6,
+          fillOpacity: 0.2
+        }).addTo(storeAddressLayer);
+        
+        logStoreAddress(`✔ ${line}`, true);
+      } else {
+        logStoreAddress(`✖ ${line} <span class="small">➜ 無法定位</span>`, false);
+      }
+
+      await sleep(1000);
+    }
+
+    addDebug(`連鎖店地址成功定位: ${successCount}/${lines.length}`);
+  }
+
+  function logStoreAddress(text, ok) {
+    const div = document.createElement("div");
+    div.className = ok ? "ok" : "fail";
+    div.innerHTML = text;
+    document.getElementById("storeAddressLog").appendChild(div);
+  }
+
+  /* ========= 連鎖店關鍵字搜尋 ========= */
+  async function searchStoresByKeyword() {
     const keyword = document.getElementById("keywordInput").value.trim();
     if (!keyword) return;
 
-    addDebug(`Overpass 查詢: ${keyword}`);
+    addDebug(`關鍵字查詢: ${keyword}`);
 
-    document.getElementById("storeLog").innerHTML = "🔍 查詢中…";
+    document.getElementById("storeKeywordLog").innerHTML = "🔍 查詢中…";
 
-    // 嘗試多種搜尋策略
     let stores = [];
     
-    // 策略 1: 使用 area 方式（您原本的版本，對某些資料較有效）
     stores = await searchOverpass(keyword, 'area');
     
-    // 策略 2: 如果沒結果，用 bounding box 精確搜尋
     if (stores.length === 0) {
       addDebug(`area 查詢無結果，嘗試 bbox 方式`);
       stores = await searchOverpass(keyword, 'bbox');
     }
     
-    // 策略 3: 如果是五金相關，搜尋 shop 標籤
     if (stores.length === 0 && keyword.includes('五金')) {
       addDebug(`嘗試搜尋 shop=hardware`);
       stores = await searchOverpass(keyword, 'shop');
     }
     
-    // 策略 4: 搜尋 amenity 標籤
     if (stores.length === 0) {
       addDebug(`嘗試搜尋 amenity`);
       stores = await searchOverpass(keyword, 'amenity');
     }
 
-    document.getElementById("storeLog").innerHTML = "";
+    document.getElementById("storeKeywordLog").innerHTML = "";
 
     if (stores.length === 0) {
-      document.getElementById("storeLog").innerHTML =
-        `<div class="fail">❌ 查無「${keyword}」相關店家<br><small>建議: 1) 換個關鍵字試試 2) OSM 可能無此資料</small></div>`;
+      document.getElementById("storeKeywordLog").innerHTML =
+        `<div class="fail">❌ 查無「${keyword}」相關店家</div>`;
       addDebug(`所有策略都查無結果`);
       return;
     }
 
-    // 顯示找到的店家
     stores.forEach(store => {
+      // 綠色圓點
       const marker = L.circleMarker([store.lat, store.lon], {
-        radius: 6,
-        fillColor: "#ff3333",
-        color: "#cc0000",
-        weight: 2,
+        radius: 3,
+        fillColor: "#33cc33",
+        color: "#228822",
+        weight: 1,
         opacity: 1,
-        fillOpacity: 0.7
+        fillOpacity: 0.9
       });
       
-      marker.bindPopup(`<b>連鎖店</b><br>${store.name}`);
-      marker.addTo(storeLayer);
+      marker.bindPopup(`<b>連鎖店 (關鍵字)</b><br>${store.name}`);
+      marker.addTo(storeKeywordLayer);
+      
+      // 3km 淡綠色圓圈（半透明）
+      L.circle([store.lat, store.lon], {
+        radius: 3000,
+        color: "#66cc66",
+        fillColor: "#99ff99",
+        weight: 2,
+        opacity: 0.6,
+        fillOpacity: 0.2
+      }).addTo(storeKeywordLayer);
 
-      document.getElementById("storeLog").innerHTML +=
+      document.getElementById("storeKeywordLog").innerHTML +=
         `<div class="ok">✔ ${store.name}</div>`;
     });
 
-    addDebug(`成功標記 ${stores.length} 個店家`);
-    addDebug(`storeLayer 內的 Marker 數量: ${Object.keys(storeLayer._layers).length}`);
+    addDebug(`成功標記 ${stores.length} 個關鍵字店家`);
   }
 
   async function searchOverpass(keyword, searchType) {
     let query;
     
-    // 策略選擇：先用 area 查詢（您之前的版本），失敗再用 bbox
     if (searchType === 'area') {
-      // 使用 area 方式（您原本的版本）
       query = `[out:json][timeout:30];
 area["name"="臺灣"]["admin_level"="2"]->.a;
 (
@@ -502,7 +532,6 @@ area["name"="臺灣"]["admin_level"="2"]->.a;
 );
 out center;`;
     } else if (searchType === 'shop') {
-      // 搜尋五金行（使用 bbox）
       query = `[out:json][timeout:30];
 (
   node["shop"="hardware"]["name"~"${keyword}",i](21.8,120.0,25.4,122.1);
@@ -512,7 +541,6 @@ out center;`;
 );
 out center;`;
     } else if (searchType === 'amenity') {
-      // 搜尋設施（使用 bbox）
       query = `[out:json][timeout:30];
 (
   node["amenity"]["name"~"${keyword}",i](21.8,120.0,25.4,122.1);
@@ -520,7 +548,6 @@ out center;`;
 );
 out center;`;
     } else {
-      // bbox 方式
       query = `[out:json][timeout:30];
 (
   node["name"~"${keyword}",i](21.8,120.0,25.4,122.1);
@@ -529,7 +556,7 @@ out center;`;
 out center;`;
     }
 
-    addDebug(`查詢類型: ${searchType}, 語法長度: ${query.length} 字元`);
+    addDebug(`查詢類型: ${searchType}`);
 
     try {
       const res = await fetch(
@@ -543,13 +570,7 @@ out center;`;
         }
       );
 
-      addDebug(`HTTP 狀態: ${res.status} ${res.statusText}`);
-
-      if (!res.ok) {
-        const errorText = await res.text();
-        addDebug(`錯誤回應: ${errorText.substring(0, 200)}`);
-        return [];
-      }
+      if (!res.ok) return [];
 
       const data = await res.json();
       addDebug(`回應元素數量 (${searchType}): ${data.elements ? data.elements.length : 0}`);
@@ -557,7 +578,7 @@ out center;`;
       const stores = [];
 
       if (data.elements && data.elements.length > 0) {
-        data.elements.forEach((el, index) => {
+        data.elements.forEach(el => {
           let lat, lon;
 
           if (el.type === 'node') {
@@ -574,7 +595,6 @@ out center;`;
               lat: parseFloat(lat),
               lon: parseFloat(lon)
             });
-            addDebug(`找到: ${el.tags.name} at [${lat}, ${lon}]`);
           }
         });
       }
@@ -582,7 +602,6 @@ out center;`;
       return stores;
 
     } catch (e) {
-      console.error('Overpass API 錯誤:', e);
       addDebug(`例外錯誤 (${searchType}): ${e.message}`);
       return [];
     }
